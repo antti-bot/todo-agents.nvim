@@ -36,6 +36,7 @@ The full buffer, including unsaved edits, is provided as task context.
 
 WORKTREES
 Each task gets its own branch from the selected repo's committed HEAD.
+New worktrees live in ~/.todo-agents/worktrees/.
 Clean worktrees are removed when the agent exits or Neovim quits normally.
 Task branches survive. Reopening recreates the worktree from its branch.
 Modified, untracked, ignored files and detached HEAD prevent removal.

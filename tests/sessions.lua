@@ -1,3 +1,4 @@
+dofile('tests/home.lua')
 local plugin = vim.fn.getcwd()
 vim.opt.rtp:prepend(plugin)
 vim.cmd('runtime plugin/todo_agents.lua')

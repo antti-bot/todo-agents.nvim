@@ -9,12 +9,13 @@ local function git(root, args)
   return vim.trim(result.stdout or '')
 end
 
-function M.prepare(record, state)
+function M.prepare(record)
   if not record.worktree then
     record.repo = require('todo_agents.repos').validate(record.cwd)
     record.branch = 'todo-agent/' .. record.id
-    record.worktree = state .. '/worktrees/' .. record.id
-    vim.fn.mkdir(state .. '/worktrees', 'p', 448)
+    local root = vim.fn.expand('~/.todo-agents/worktrees')
+    record.worktree = root .. '/' .. record.id
+    vim.fn.mkdir(root, 'p', 448)
     git(record.repo, { 'worktree', 'add', '-b', record.branch, record.worktree, 'HEAD' })
   elseif not uv.fs_stat(record.worktree) then
     git(record.repo, { 'show-ref', '--verify', 'refs/heads/' .. record.branch })

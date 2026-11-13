@@ -57,7 +57,7 @@ The mapping is local to task buffers. Enter and other editing keys keep their us
 
 ## Worktrees and sessions
 
-Each task gets a `todo-agent/<task-id>` branch and a worktree under `stdpath('state')/todo-agents/worktrees/`. It starts from the selected repo's committed HEAD. Uncommitted changes in your main checkout are not copied.
+Each task gets a `todo-agent/<task-id>` branch and a worktree under `~/.todo-agents/worktrees/`. It starts from the selected repo's committed HEAD. Uncommitted changes in your main checkout are not copied.
 
 When the agent exits, its terminal is deleted, or Neovim quits normally, a clean worktree is removed. Its branch is retained, including unmerged commits. Reopening the session recreates the worktree from that branch. Modified, untracked, and ignored files prevent removal; there are no routine notifications. Run `:TodoAgentCleanup` on a stopped task to retry cleanup and see why it was retained. Crashes can leave worktrees behind.
 

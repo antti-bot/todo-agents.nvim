@@ -83,7 +83,7 @@ local function launch(record, resume, split)
   local argv = vim.deepcopy(config.command)
   if not argv[1] or vim.fn.executable(argv[1]) ~= 1 then error('Codex executable not found', 0) end
   if resume and not record.session_id then error('Session not bound; use :TodoAgentBind with the ID from /status', 0) end
-  worktree.prepare(record, state())
+  worktree.prepare(record)
   if resume then vim.list_extend(argv, { 'resume', record.session_id })
   else
     record.prompt = record.prompt .. '\nTask worktree: ' .. record.cwd .. '\nEdit only this repository.'
