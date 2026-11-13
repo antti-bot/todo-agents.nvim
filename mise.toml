@@ -1,0 +1,7 @@
+[tools]
+neovim = "0.12.6"
+gh = "2.103.3"
+
+[tasks.test]
+description = "Run isolated headless Neovim integration tests"
+run = "./tests/test.sh"

@@ -1,0 +1,26 @@
+*todo-agents.txt*          Turn Markdown TODOs into agent sessions
+
+Requires Neovim 0.10+ and Codex CLI or Claude Code.
+
+:TodoAgent [provider]     Launch task under cursor, or open linked task.
+:TodoAgentOpen            Open linked agent terminal or resume its session.
+:TodoAgentToggle          Toggle the checkbox without changing its link.
+:TodoAgentBind {id}       Bind task/terminal to a provider session ID.
+
+Call require('todo_agents').setup() to enable default mappings:
+  <leader>aa  Launch/open task
+  <leader>ac  Launch Claude
+  <leader>ax  Toggle checkbox
+  gx          Open agent link or ordinary URL
+
+Pass { mappings = false } to supply your own mappings.
+Pass { context = false } to omit the buffer snapshot.
+
+Links and context snapshots persist under stdpath('state')/todo-agents.
+Save the TODO buffer normally; the plugin does not write it to disk.
+Codex transcript discovery binds an exact session when possible; use
+:TodoAgentBind with the ID from /status if discovery is unavailable.
+
+See README.md for configuration, lifecycle and context details.
+
+vim:tw=78:ts=8:noet:ft=help:norl:
