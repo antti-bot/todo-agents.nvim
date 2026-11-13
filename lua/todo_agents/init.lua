@@ -1,50 +1,57 @@
 local M = {}
 local task = require('todo_agents.task')
+local repos = require('todo_agents.repos')
 local worktree = require('todo_agents.worktree')
-local config = { provider = 'codex', commands = { codex = { 'codex' }, claude = { 'claude' } },
-  mappings = true, context = true, worktrees = true }
-local live = {}
+local ui = require('todo_agents.ui')
 local uv = vim.uv or vim.loop
+local config = { command = { 'codex' }, mappings = true }
+local live, origins = {}, {}
 
-local function dir()
+local function state()
   local path = vim.fn.stdpath('state') .. '/todo-agents'
   vim.fn.mkdir(path, 'p', 448)
   return path
 end
-local function uuid()
-  local hex = vim.fn.sha256(tostring(uv.hrtime()) .. tostring({}) .. tostring(vim.fn.getpid()))
-  return hex:sub(1, 8) .. '-' .. hex:sub(9, 12) .. '-4' .. hex:sub(14, 16)
-    .. '-a' .. hex:sub(18, 20) .. '-' .. hex:sub(21, 32)
-end
+
 local function save(record)
-  local path = dir() .. '/' .. record.id .. '.json'
-  if vim.fn.writefile({ vim.json.encode(record) }, path) ~= 0 then error('Cannot save session metadata') end
-  uv.fs_chmod(path, 384)
-end
-local function load(id)
-  local path = dir() .. '/' .. id .. '.json'
-  if vim.fn.filereadable(path) == 0 then error('Session metadata missing on this machine: ' .. id) end
-  return vim.json.decode(table.concat(vim.fn.readfile(path), '\n'))
-end
-local function cleanup(record)
-  local ok, removed, message = pcall(worktree.cleanup, record)
-  if not ok then
-    vim.notify('todo-agents: worktree cleanup failed: ' .. tostring(removed), vim.log.levels.WARN)
-  elseif not removed then
-    vim.notify('todo-agents: ' .. message, vim.log.levels.WARN)
+  local keys = { record.id }
+  if record.session_id and record.session_id ~= record.id then keys[#keys + 1] = record.session_id end
+  for _, key in ipairs(keys) do
+    local path = state() .. '/' .. key .. '.json'
+    if vim.fn.writefile({ vim.json.encode(record) }, path) ~= 0 then error('Cannot save session', 0) end
+    uv.fs_chmod(path, 384)
   end
 end
-local function current()
-  local row = vim.api.nvim_win_get_cursor(0)[1]
-  local parsed = task.parse(vim.api.nvim_get_current_line())
-  if not parsed then error('Put the cursor on a Markdown checkbox task') end
-  return parsed, row
+
+local function load(id)
+  local path = state() .. '/' .. id .. '.json'
+  if vim.fn.filereadable(path) == 0 then error('Session metadata missing: ' .. id, 0) end
+  return vim.json.decode(table.concat(vim.fn.readfile(path), '\n'))
 end
--- Bind only a transcript containing this task's unique launch marker. Never use --last.
-local function discover_codex(record, attempt)
-  if record.session_id then return end
-  local persisted = load(record.id)
-  if persisted.session_id then record.session_id = persisted.session_id; return end
+
+local function relink(record)
+  local buf = origins[record.id]
+  if not record.session_id or not buf or not vim.api.nvim_buf_is_loaded(buf) or not vim.bo[buf].modifiable then return end
+  for row, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+    local parsed = task.parse(line)
+    if parsed and parsed.pending and parsed.id == record.id then
+      local first, last = line:find('%(codex://task/[%w_-]+%)')
+      vim.api.nvim_buf_set_text(buf, row - 1, first - 1, row - 1, last, { '(codex://' .. record.session_id .. ')' })
+    end
+  end
+end
+
+local function bind(record, id)
+  if not id:match('^[%w_-]+$') then error('Invalid session ID', 0) end
+  if record.session_id and record.session_id ~= id then error('Task is already bound to a session', 0) end
+  record.session_id = id
+  save(record)
+  relink(record)
+end
+
+local function discover(record, attempt)
+  record = load(record.id)
+  if record.session_id then return relink(record) end
   local home = vim.env.CODEX_HOME or (vim.fn.expand('~') .. '/.codex')
   for _, path in ipairs(vim.fn.glob(home .. '/sessions/**/*.jsonl', false, true)) do
     local stat = uv.fs_stat(path)
@@ -55,173 +62,146 @@ local function discover_codex(record, attempt)
         file:close()
         if content:find('todo-agent-task:' .. record.id, 1, true) then
           local ok, meta = pcall(vim.json.decode, content:match('[^\n]+') or '')
-          if ok and meta.type == 'session_meta' and meta.payload and meta.payload.id then
-            record.session_id = meta.payload.id
-            save(record)
-            return
+          if ok and meta.type == 'session_meta' and meta.payload and type(meta.payload.id) == 'string' then
+            return bind(record, meta.payload.id)
           end
         end
       end
     end
   end
-  if attempt < 30 then vim.defer_fn(function() discover_codex(record, attempt + 1) end, 2000) end
+  if attempt < 30 then vim.defer_fn(function() ui.call(discover, record, attempt + 1) end, 2000) end
 end
-local function launch(record, resume)
-  local existing = live[record.id]
-  if existing and vim.api.nvim_buf_is_valid(existing.buf) then
-    local windows = vim.fn.win_findbuf(existing.buf)
-    if #windows > 0 then vim.api.nvim_set_current_win(windows[1])
-    else vim.cmd('botright vsplit'); vim.api.nvim_win_set_buf(0, existing.buf) end
+
+local function launch(record, resume, split)
+  local running = live[record.id]
+  if running and vim.api.nvim_buf_is_valid(running.buf) then
+    if split then vim.cmd('botright vsplit') end
+    vim.api.nvim_win_set_buf(0, running.buf)
     vim.cmd('startinsert')
     return
   end
-  local argv = vim.deepcopy(config.commands[record.provider])
-  if not argv or not argv[1] then error('Unknown provider: ' .. tostring(record.provider)) end
-  if vim.fn.executable(argv[1]) ~= 1 then error('Executable not found: ' .. argv[1]) end
-  if resume then
-    if record.provider == 'claude' then
-      vim.list_extend(argv, { '--resume', record.session_id })
-    elseif record.session_id then
-      vim.list_extend(argv, { 'resume', record.session_id })
-    else
-      error('Codex session is not bound. Use :TodoAgentBind <ID> from Codex /status before reopening')
-    end
+  local argv = vim.deepcopy(config.command)
+  if not argv[1] or vim.fn.executable(argv[1]) ~= 1 then error('Codex executable not found', 0) end
+  if resume and not record.session_id then error('Session not bound; use :TodoAgentBind with the ID from /status', 0) end
+  worktree.prepare(record, state())
+  if resume then vim.list_extend(argv, { 'resume', record.session_id })
   else
-    if record.provider == 'claude' then
-      record.session_id = record.id
-      vim.list_extend(argv, { '--session-id', record.id })
-    end
-    table.insert(argv, record.prompt)
+    record.prompt = record.prompt .. '\nTask worktree: ' .. record.cwd .. '\nEdit only this repository.'
+    argv[#argv + 1] = record.prompt
   end
-  worktree.prepare(record, dir())
   save(record)
-  vim.cmd('botright vsplit')
+  if split then vim.cmd('botright vsplit') end
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_win_set_buf(0, buf)
-  local ok, job = pcall(vim.fn.termopen, argv, { cwd = record.cwd, on_exit = function(_, code)
-    -- Clear and clean together so reopening cannot race a queued cleanup.
+  local ok, job = pcall(vim.fn.termopen, argv, { cwd = record.cwd, on_exit = function()
     vim.schedule(function()
       live[record.id] = nil
-      cleanup(record)
-      if code ~= 0 then
-        vim.notify('todo-agents: ' .. record.provider .. ' exited with code ' .. code, vim.log.levels.WARN)
-      end
+      ui.call(worktree.cleanup, record)
     end)
   end })
   if not ok or job <= 0 then
-    cleanup(record)
+    ui.call(worktree.cleanup, record)
+    vim.api.nvim_win_set_buf(0, origins[record.id])
     vim.api.nvim_buf_delete(buf, { force = true })
-    error('Failed to start ' .. record.provider)
+    error('Cannot start Codex', 0)
   end
   live[record.id] = { buf = buf, job = job, record = record }
   vim.bo[buf].bufhidden = 'hide'
   vim.b[buf].todo_agent_id = record.id
-  save(record)
-  if record.provider == 'codex' and not resume then
-    vim.defer_fn(function() discover_codex(record, 1) end, 1000)
-  end
+  if not resume then vim.defer_fn(function() ui.call(discover, record, 1) end, 1000) end
   vim.cmd('startinsert')
 end
 
-function M.start(provider)
-  local parsed, row = current()
-  if parsed.id then return M.open() end
-  if parsed.check:lower() == 'x' then error('Task is already checked; uncheck it before launching') end
-  provider = provider or config.provider
-  if not config.commands[provider] then error('Unknown provider: ' .. tostring(provider)) end
-  if vim.fn.executable(config.commands[provider][1]) ~= 1 then
-    error('Executable not found: ' .. config.commands[provider][1])
+function M.open(split)
+  local buf, row = vim.api.nvim_get_current_buf(), vim.api.nvim_win_get_cursor(0)[1]
+  M.attach(buf)
+  local line = vim.api.nvim_get_current_line()
+  local parsed = task.parse(line)
+  local id = parsed and parsed.id or task.id(line)
+  if id then
+    local record = load(id)
+    origins[record.id] = buf
+    relink(record)
+    return launch(record, true, split)
   end
-  local buf = vim.api.nvim_get_current_buf()
-  if not vim.bo[buf].modifiable then error('TODO buffer is not modifiable') end
-  local path = vim.api.nvim_buf_get_name(buf)
-  local base = path ~= '' and vim.fs.dirname(path) or vim.fn.getcwd()
-  local root = base
-  if vim.fn.executable('git') == 1 then
-    local result = vim.system({ 'git', '-C', base, 'rev-parse', '--show-toplevel' }, { text = true }):wait(10000)
-    if result.code == 0 then root = vim.trim(result.stdout) end
-  end
-  local id = uuid()
-  local snapshot = dir() .. '/' .. id .. '.md'
-  local prompt
-  if config.context then
-    if vim.fn.writefile(vim.api.nvim_buf_get_lines(buf, 0, -1, false), snapshot) ~= 0 then
-      error('Cannot write context snapshot')
-    end
-    uv.fs_chmod(snapshot, 384)
-    prompt = task.prompt(parsed, path ~= '' and path or '[unnamed buffer]', row, snapshot)
-  else
-    prompt = 'Work on this TODO item:\n' .. parsed.text
-  end
-  prompt = prompt .. '\n\nLaunch marker: todo-agent-task:' .. id
-  local record = { id = id, provider = provider, cwd = root, prompt = prompt, source = path, started = os.time(), isolated = config.worktrees }
-  if config.worktrees then
-    record.prompt = record.prompt .. '\nWork only in the task Git worktree provided as your working directory.'
-  end
-  -- Only change the TODO after the process has successfully started.
-  launch(record, false)
-  vim.api.nvim_buf_set_lines(buf, row - 1, row, false, { task.link(parsed, provider, id) })
+  if not parsed then error('Cursor is not on a task or Codex link', 0) end
+  if parsed.check:lower() == 'x' then error('Task is checked', 0) end
+  if not vim.bo[buf].modifiable then error('TODO buffer is not modifiable', 0) end
+  if not config.command[1] or vim.fn.executable(config.command[1]) ~= 1 then error('Codex executable not found', 0) end
+  local repo = repos.validate(repos.selected(buf, row))
+  id = vim.fn.sha256(tostring(uv.hrtime()) .. tostring({}) .. vim.fn.getpid()):sub(1, 24)
+  local snapshot = state() .. '/' .. id .. '.md'
+  if vim.fn.writefile(vim.api.nvim_buf_get_lines(buf, 0, -1, false), snapshot) ~= 0 then error('Cannot save TODO context', 0) end
+  uv.fs_chmod(snapshot, 384)
+  local record = { id = id, repo = repo, cwd = repo, started = os.time(),
+    prompt = task.prompt(parsed, vim.api.nvim_buf_get_name(buf), row, snapshot) .. '\nLaunch marker: todo-agent-task:' .. id }
+  origins[id] = buf
+  launch(record, false, split)
+  vim.api.nvim_buf_set_text(buf, row - 1, 0, row - 1, #line, { task.link(parsed, id, true) })
 end
 
-function M.open()
-  local parsed = current()
-  if not parsed.id then return M.start() end
-  local record = load(parsed.id)
-  if record.provider ~= parsed.provider then error('Link provider does not match session metadata') end
-  launch(record, true)
+function M.bind(id)
+  local parsed = task.parse(vim.api.nvim_get_current_line())
+  local key = vim.b.todo_agent_id or (parsed and parsed.id)
+  if not key then error('Task has no session', 0) end
+  bind(load(key), id)
 end
 
 function M.cleanup()
-  local parsed = current()
-  if not parsed.id then error('No agent linked to this task') end
-  if live[parsed.id] then error('Stop the task agent before cleaning its worktree') end
-  cleanup(load(parsed.id))
+  local parsed = task.parse(vim.api.nvim_get_current_line())
+  if not parsed or not parsed.id then error('Task has no session', 0) end
+  local record = load(parsed.id)
+  if live[record.id] then error('Task is running', 0) end
+  local clean, reason = worktree.cleanup(record)
+  if not clean then error(reason, 0) end
 end
 
--- Stop processes before removing their directories during a normal Neovim exit.
+function M.attach(buf)
+  buf = buf or vim.api.nvim_get_current_buf()
+  if vim.b[buf].todo_agents or not config.mappings then return end
+  vim.b[buf].todo_agents = true
+  local fallback = vim.fn.maparg('gx', 'n', false, true)
+  vim.keymap.set('n', 'gx', function()
+    local line = vim.api.nvim_get_current_line()
+    if task.parse(line) or task.id(line, vim.api.nvim_win_get_cursor(0)[2]) then return ui.call(M.open) end
+    if type(fallback.callback) == 'function' then return fallback.callback() end
+    if fallback.rhs and fallback.rhs ~= '' then
+      return vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(fallback.rhs, true, false, true), 'm', false)
+    end
+    vim.ui.open(vim.fn.expand('<cfile>'))
+  end, { buffer = buf, desc = 'Open task or link' })
+end
+
+function M.plan(path)
+  if not path or path == '' then path = repos.root(vim.fn.getcwd()) .. '/TODO.md' end
+  vim.cmd.edit(vim.fn.fnameescape(path))
+  vim.bo.filetype = 'markdown'
+  M.attach()
+end
+
+function M.setup(opts)
+  config = vim.tbl_deep_extend('force', { command = { 'codex' }, mappings = true }, opts or {})
+  local function detect(buf)
+    if vim.b[buf].todo_agents or vim.bo[buf].buftype ~= '' then return end
+    local ft = vim.bo[buf].filetype
+    if ft == '' or ft == 'text' or ft == 'markdown' then
+      if task.contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) then M.attach(buf) end
+    end
+  end
+  vim.api.nvim_create_autocmd({ 'BufReadPost', 'FileType', 'TextChanged', 'TextChangedI' }, {
+    group = vim.api.nvim_create_augroup('TodoAgentsBuffers', { clear = true }), callback = function(args) detect(args.buf) end,
+  })
+  detect(vim.api.nvim_get_current_buf())
+end
+
 vim.api.nvim_create_autocmd('VimLeavePre', {
-  group = vim.api.nvim_create_augroup('TodoAgentsLifecycle', { clear = true }),
-  callback = function()
-    for _, session in pairs(live) do
-      pcall(vim.fn.jobstop, session.job)
-      local result = vim.fn.jobwait({ session.job }, 1000)[1]
-      if result ~= -1 then cleanup(session.record) end
+  group = vim.api.nvim_create_augroup('TodoAgentsLifecycle', { clear = true }), callback = function()
+    local sessions = vim.tbl_values(live)
+    for _, session in ipairs(sessions) do pcall(vim.fn.jobstop, session.job) end
+    for _, session in ipairs(sessions) do
+      if vim.fn.jobwait({ session.job }, 1000)[1] ~= -1 then ui.call(worktree.cleanup, session.record) end
     end
   end,
 })
 
-function M.toggle()
-  local parsed, row = current()
-  local line = vim.api.nvim_get_current_line()
-  local start = #parsed.prefix + 2
-  local check = parsed.check == ' ' and 'x' or ' '
-  vim.api.nvim_buf_set_lines(0, row - 1, row, false, { line:sub(1, start - 1) .. check .. line:sub(start + 1) })
-end
-
-function M.bind(id)
-  if not id:match('^[%w_-]+$') then error('Invalid session ID') end
-  local link_id = vim.b.todo_agent_id
-  if not link_id then link_id = current().id end
-  if not link_id then error('No agent linked to this task') end
-  local record = load(link_id)
-  record.session_id = id
-  save(record)
-  vim.notify('todo-agents: session bound to ' .. id)
-end
-
-function M.setup(opts)
-  config = vim.tbl_deep_extend('force', config, opts or {})
-  if config.mappings then
-    vim.keymap.set('n', '<leader>aa', '<cmd>TodoAgent<cr>', { desc = 'Start/open TODO agent' })
-    vim.keymap.set('n', '<leader>ac', '<cmd>TodoAgent claude<cr>', { desc = 'Start Claude TODO agent' })
-    vim.keymap.set('n', '<leader>ax', '<cmd>TodoAgentToggle<cr>', { desc = 'Toggle TODO checkbox' })
-    vim.keymap.set('n', 'gx', function()
-      local parsed = task.parse(vim.api.nvim_get_current_line())
-      if parsed and parsed.id then
-        local ok, err = pcall(M.open)
-        if not ok then vim.notify(tostring(err), vim.log.levels.ERROR) end
-      else vim.ui.open(vim.fn.expand('<cfile>')) end
-    end, { desc = 'Open TODO agent or URL' })
-  end
-end
 return M

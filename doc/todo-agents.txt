@@ -1,32 +1,64 @@
-*todo-agents.txt*          Turn Markdown TODOs into agent sessions
+*todo-agents.txt*  *todo-agents*  Text tasks linked to Codex sessions
 
-Requires Neovim 0.10+ and Codex CLI or Claude Code.
+Write an ordinary text or Markdown file:
+>
+    ~/code/api
+    - [ ] Fix validation
+    - [ ] Add coverage
 
-:TodoAgent [provider]     Launch task under cursor, or open linked task.
-:TodoAgentOpen            Open linked agent terminal or resume its session.
-:TodoAgentToggle          Toggle the checkbox without changing its link.
-:TodoAgentCleanup         Remove a stopped task worktree when clean.
-:TodoAgentBind {id}       Bind task/terminal to a provider session ID.
+    ~/code/web
+    - [ ] Fix the error screen
+<
+Each task belongs to the last folder above it. Relative paths are relative
+to this file. Without a folder, use the repo containing the file. Each task
+has one repo. Reading or editing the file creates no worktrees.
 
-Call require('todo_agents').setup() to enable default mappings:
-  <leader>aa  Launch/open task
-  <leader>ac  Launch Claude
-  <leader>ax  Toggle checkbox
-  gx          Open agent link or ordinary URL
+Press gx on a task to create its worktree and open Codex. The task becomes
+a Markdown link using the actual Codex session ID. Save the file normally.
 
-Pass { mappings = false } to supply your own mappings.
-Pass { context = false } to omit the buffer snapshot.
+SHORTCUT
+    gx          Start a plain task or reopen its Codex session link.
+                Other links use your existing gx mapping.
 
-Links and context snapshots persist under stdpath('state')/todo-agents.
-Each task gets a Git worktree and branch by default. Clean worktrees are
-removed when the agent exits; task branches survive for reopening. Dirty,
-untracked and ignored files prevent removal. :TodoAgentCleanup retries.
-Set { worktrees = false } to use the original project directory.
+This is the only plugin mapping, local to task buffers. Edit checkboxes as
+ordinary text. In a terminal, <C-\><C-n> enters normal mode; native <C-^>
+(usually Ctrl-6) switches back to the alternate buffer. Enter is unchanged.
+Use :vertical TodoAgent to open the task in a split.
 
-Save the TODO buffer normally; the plugin does not write it to disk.
-Codex transcript discovery binds an exact session when possible; use
-:TodoAgentBind with the ID from /status if discovery is unavailable.
+LINKS                                                   *todo-agents-links*
+>
+    - [ ] [Fix validation](codex://<session-id>)
+<
+Links resume that exact local session, including from another note. While
+Codex starts, a temporary codex://task/<task-id> link opens its live terminal.
+Session metadata and TODO snapshots live in stdpath('state')/todo-agents.
+The full buffer, including unsaved edits, is provided as task context.
 
-See README.md for configuration, lifecycle and context details.
+WORKTREES
+Each task gets its own branch from the selected repo's committed HEAD.
+Clean worktrees are removed when the agent exits or Neovim quits normally.
+Task branches survive. Reopening recreates the worktree from its branch.
+Modified, untracked, ignored files and detached HEAD prevent removal.
+:TodoAgentCleanup retries cleanup on a stopped task. Crashes can leave
+worktrees behind. Review and merge branches yourself. Completion is manual.
+
+COMMANDS
+    :Todo [file]               Open a plan; default is the repo's TODO.md.
+    :TodoAgent                 Same as gx on a task.
+    :vertical TodoAgent        Open the task in a vertical split.
+    :TodoAgentBind {id}        Bind an unbound task to the ID from /status.
+    :TodoAgentCleanup          Remove a clean, stopped task worktree.
+
+CONFIGURATION
+>
+    require('todo_agents').setup({
+      command = { 'codex' },
+      mappings = true,
+    })
+<
+Set mappings = false for custom keys. The Lua entry point is
+require('todo_agents').open(); open(true) uses a vertical split.
+
+Requires Neovim 0.10+, Git, and an authenticated Codex CLI.
 
 vim:tw=78:ts=8:noet:ft=help:norl:
