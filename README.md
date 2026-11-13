@@ -100,8 +100,8 @@ mise run test
 
 Or run `NVIM=/path/to/nvim ./tests/test.sh`. Tests use temporary Git repositories and a fake Codex process; Python 3 is required only for the tests. They cover repo scope, session discovery and links, restart/resume, worktree cleanup, dirty-file preservation, and normal Neovim shutdown. They do not make provider API calls.
 
-To create and push the private repository:
+To create and push the public repository:
 
 ```sh
-mise exec -- gh repo create EskelinenAntti/todo-agents.nvim --private --source=. --remote=origin --push
+mise exec -- gh repo create EskelinenAntti/todo-agents.nvim --public --source=. --remote=origin --push
 ```
