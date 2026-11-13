@@ -1,17 +1,16 @@
+"""A persistent test process that reports itself through Herdr's public API."""
 import json
 import os
+import subprocess
 import sys
 import time
-import uuid
-from pathlib import Path
 
-if '--exit=0' in sys.argv:
-    sys.exit(0)
-
-if 'resume' not in sys.argv:
-    session = str(uuid.uuid5(uuid.NAMESPACE_URL, 'codex:' + os.getcwd()))
-    directory = Path(os.environ['CODEX_HOME']) / 'sessions' / 'test'
-    directory.mkdir(parents=True, exist_ok=True)
-    with (directory / (session + '.jsonl')).open('w') as output:
-        output.write(json.dumps({'type': 'session_meta', 'payload': {'id': session, 'cwd': os.getcwd()}}) + '\n')
-time.sleep(30)
+with open(os.environ['TODO_TEST_LAUNCHES'], 'a') as output:
+    output.write(json.dumps({'cwd': os.getcwd(), 'argv': sys.argv[1:], 'pane': os.environ['HERDR_PANE_ID']}) + '\n')
+subprocess.run([
+    os.environ['HERDR_BIN_PATH'], 'pane', 'report-agent', os.environ['HERDR_PANE_ID'],
+    '--source', 'todo-test', '--agent', 'codex', '--state', 'idle',
+], check=True)
+print('Test agent ready', flush=True)
+while True:
+    time.sleep(1)

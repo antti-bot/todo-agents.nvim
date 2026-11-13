@@ -1,22 +1,31 @@
-dofile('tests/home.lua')
 local plugin = vim.fn.getcwd()
 vim.opt.rtp:prepend(plugin)
 local agent = require('todo_agents')
-local saved = vim.fn.readfile(vim.env.XDG_STATE_HOME .. '/reopen-session')
-local session, task = saved[1], saved[2]
-local path = vim.fn.expand('~/.todo-agents/worktrees') .. '/' .. task
-assert(not (vim.uv or vim.loop).fs_stat(path))
-local termopen = vim.fn.termopen
-vim.fn.termopen = function(argv, opts)
-  assert(argv[3] == 'resume' and argv[4] == session)
-  assert(opts.cwd == path)
-  return termopen(argv, opts)
+local herdr = require('todo_agents.worktree').herdr
+local function test()
+  local saved = vim.fn.readfile(vim.env.XDG_STATE_HOME .. '/reopen-task')
+  local uri, path, pane_id, workspace = unpack(saved)
+  assert(vim.fn.isdirectory(path) == 1, 'Neovim exit removed the worktree')
+  local panes = herdr({ 'pane', 'list', '--workspace', workspace }).panes
+  local alive = false
+  for _, pane in ipairs(panes) do
+    if pane.pane_id == pane_id then alive = pane.agent == 'codex' end
+  end
+  assert(alive, 'Neovim exit stopped the agent')
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { '[Task](' .. uri .. ')' })
+  agent.setup()
+  agent.open()
+  local launch_count = #vim.fn.readfile(vim.env.TODO_TEST_LAUNCHES)
+  assert(launch_count == 2, 'Reopening started another agent')
+  assert(vim.fn.readfile(path .. '/file.txt')[1] == 'agent edit')
+  -- Workspace IDs can change: the saved path still reopens the checkout.
+  herdr({ 'workspace', 'close', workspace })
+  agent.open()
+  local reopened = require('todo_agents.worktree').open(path)
+  assert(reopened.workspace.workspace_id ~= workspace)
+  assert(vim.fn.readfile(path .. '/file.txt')[1] == 'agent edit')
+  assert(#vim.fn.readfile(vim.env.TODO_TEST_LAUNCHES) == 2)
+  print('Neovim restart preserves agents; closed workspaces reopen without losing edits')
 end
-vim.api.nvim_buf_set_lines(0, 0, -1, false, { '[Session](codex://' .. session .. ')' })
-agent.setup({ command = { 'python3', plugin .. '/tests/fake_codex.py' } })
-agent.open()
-assert((vim.uv or vim.loop).fs_stat(path))
-vim.fn.jobstop(vim.b.terminal_job_id)
-assert(vim.wait(3000, function() return not (vim.uv or vim.loop).fs_stat(path) end, 20))
-print('Restart and resume test passed')
-vim.cmd('qa!')
+local ok, err = xpcall(test, debug.traceback)
+if not ok then io.stderr:write(err .. '\n'); vim.cmd('cquit 1') else vim.cmd('qa!') end

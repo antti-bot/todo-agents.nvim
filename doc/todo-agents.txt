@@ -1,54 +1,48 @@
-*todo-agents.txt*  *todo-agents*  Text tasks linked to Codex sessions
+*todo-agents.txt*  *todo-agents*  TODO tasks linked to Herdr workspaces
 
-Write an ordinary text or Markdown file:
+Open a Markdown or text file in Neovim inside Herdr:
 >
-    ~/code/api
+    #### ~/code/api
     - [ ] Fix validation
-    - [ ] Add coverage
-
-    ~/code/web
-    - [ ] Fix the error screen
+    - [ ] Add search
 <
-Each task belongs to the last folder above it. Relative paths are relative
-to this file. Without a folder, use the repo containing the file. Each task
-has one repo. Reading or editing the file creates no worktrees.
+Press gx on an unchecked task. Herdr creates a worktree and task branch
+from the repo's local main branch, starts Codex with an empty composer,
+and selects its workspace. Type your instructions in Codex.
 
-Press gx on a task to create its worktree and open Codex. The task becomes
-a Markdown link using the actual Codex session ID. Save the file normally.
+The task becomes a herdr:// link to its worktree. Save the file normally.
+Press gx on the link to return to the workspace's agent, including when
+a review tab is selected. With no running agent, gx opens the workspace.
+Start or resume your agent from its shell.
+
+REVIEW
+In the task workspace, Ctrl-B then C creates another tab with Herdr's
+default keys. With terminal.new_cwd = "follow" (the default), its shell
+starts in the same worktree. Run git diff main, git status, or nvim .
+Your agent stays in its tab; use your TODO link to return to it.
+
+FOLDERS
+Each task belongs to the last folder or Markdown heading above it.
+All heading levels work. Paths may be absolute, ~/..., or relative to
+the TODO file. A trailing / makes a relative folder name explicit.
+Without a folder, use the file's repo or cwd for an unnamed buffer.
+Invalid folders and fenced code examples do nothing. Checked tasks cannot
+start new agents; their existing links still work.
+Local main must exist. The plugin never fetches or pulls.
 
 SHORTCUT
-    gx          Start a plain task or reopen its Codex session link.
+    gx          Create a task workspace or return to its agent.
                 Other links use your existing gx mapping.
 
-This is the only plugin mapping, local to task buffers. Edit checkboxes as
-ordinary text. In a terminal, <C-\><C-n> enters normal mode; native <C-^>
-(usually Ctrl-6) switches back to the alternate buffer. Enter is unchanged.
-Use :vertical TodoAgent to open the task in a split.
+The mapping is local to Markdown, text, and buffers without a filetype.
+There are no Ex commands. Edit checkboxes as ordinary text.
 
-LINKS                                                   *todo-agents-links*
->
-    - [ ] [Fix validation](codex://<session-id>)
-<
-Links resume that exact local session, including from another note. While
-Codex starts, a temporary codex://task/<task-id> link opens its live terminal.
-Session metadata and TODO snapshots live in stdpath('state')/todo-agents.
-The full buffer, including unsaved edits, is provided as task context.
-
-WORKTREES
-Each task gets its own branch from the selected repo's committed HEAD.
-New worktrees live in ~/.todo-agents/worktrees/.
-Clean worktrees are removed when the agent exits or Neovim quits normally.
-Task branches survive. Reopening recreates the worktree from its branch.
-Modified, untracked, ignored files and detached HEAD prevent removal.
-:TodoAgentCleanup retries cleanup on a stopped task. Crashes can leave
-worktrees behind. Review and merge branches yourself. Completion is manual.
-
-COMMANDS
-    :Todo [file]               Open a plan; default is the repo's TODO.md.
-    :TodoAgent                 Same as gx on a task.
-    :vertical TodoAgent        Open the task in a vertical split.
-    :TodoAgentBind {id}        Bind an unbound task to the ID from /status.
-    :TodoAgentCleanup          Remove a clean, stopped task worktree.
+HERDR
+Herdr owns terminals, tabs, worktrees, and persistence. Closing Neovim
+leaves agents running. The plugin does not delete worktrees or branches,
+merge changes, save the TODO file, or send prompts to an agent.
+Links contain worktree paths and need no plugin metadata or session scans.
+Commands use the calling Herdr session and socket context.
 
 CONFIGURATION
 >
@@ -57,9 +51,9 @@ CONFIGURATION
       mappings = true,
     })
 <
-Set mappings = false for custom keys. The Lua entry point is
-require('todo_agents').open(); open(true) uses a vertical split.
+command is an argument array. Set mappings = false for custom keys.
+The Lua entry point is require('todo_agents').open().
 
-Requires Neovim 0.10+, Git, and an authenticated Codex CLI.
+Requires Neovim 0.10+, Git, Herdr TUI 0.9.5+, and an authenticated agent CLI.
 
 vim:tw=78:ts=8:noet:ft=help:norl:

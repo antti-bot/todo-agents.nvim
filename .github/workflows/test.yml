@@ -8,8 +8,13 @@ jobs:
         neovim: [v0.10.4, stable]
     steps:
       - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v3
+        with:
+          install_args: herdr
+          add_shims_to_path: false
+          export_path: false
       - uses: rhysd/action-setup-vim@v1
         with:
           neovim: true
           version: ${{ matrix.neovim }}
-      - run: ./tests/test.sh
+      - run: HERDR=$(mise which herdr) ./tests/test.sh
