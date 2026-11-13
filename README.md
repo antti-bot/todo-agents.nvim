@@ -28,7 +28,7 @@ Requires Neovim 0.10+, Git, and an authenticated Codex CLI on `PATH`.
 ```lua
 -- lazy.nvim
 {
-  'EskelinenAntti/todo-agents.nvim',
+  'antti-bot/todo-agents.nvim',
   opts = {},
 }
 ```
@@ -103,5 +103,5 @@ Or run `NVIM=/path/to/nvim ./tests/test.sh`. Tests use temporary Git repositorie
 To create and push the public repository:
 
 ```sh
-mise exec -- gh repo create EskelinenAntti/todo-agents.nvim --public --source=. --remote=origin --push
+mise exec -- gh repo create antti-bot/todo-agents.nvim --public --source=. --remote=origin --push
 ```
