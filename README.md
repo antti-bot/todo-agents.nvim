@@ -13,7 +13,7 @@ Put the cursor on a task and press `<leader>aa`:
 - [ ] [Fix the login redirect](todo-agent://codex/174d8b25-33e1-4d88-a213-22c71e1ffabc)
 ```
 
-The agent opens in a vertical terminal split. It receives the task, source path and line number, and instructions to read a snapshot of the full current buffer, including unsaved edits. Working directory is the nearest Git root, or the TODO file's directory. Unnamed buffers use Neovim's current directory. No special file type is required.
+The agent opens in a vertical terminal split. It receives the task, source path and line number, and instructions to read a snapshot of the full current buffer, including unsaved edits. Each task starts in a separate Git worktree branched from the project's current HEAD. The project is found from the TODO file's directory; unnamed buffers use Neovim's current directory. No special file type is required.
 
 ## Install
 
@@ -48,7 +48,17 @@ When adding runtimepath after startup, also run `:runtime plugin/todo_agents.lua
 
 `:TodoAgent [codex\|claude]`, `:TodoAgentOpen`, and `:TodoAgentToggle` also work without mappings. Existing links always reopen their original provider. Checked tasks must be unchecked before launching. Your buffer is modified but never saved automatically. Save it normally to retain links. Checkbox completion is manual and independent of process exit.
 
-Use `<C-\\><C-n>` to leave terminal mode and `<C-w>p` to return to the TODO buffer. Hiding the terminal keeps it running; wiping the terminal buffer or quitting Neovim ends it. Agents run in the same project working tree, so coordinate tasks that edit the same files.
+Use `<C-\\><C-n>` to leave terminal mode and `<C-w>p` to return to the TODO buffer. Hiding the terminal keeps it running; wiping the terminal buffer or quitting Neovim ends it. Each agent works in its own directory and branch.
+
+## Automatic worktrees
+
+Worktrees are enabled by default and require a Git repository with at least one commit. Each task gets branch `todo-agent/<task-id>` and directory `stdpath('state')/todo-agents/worktrees/<task-id>`. Your main checkout's uncommitted changes are not copied; the TODO buffer snapshot is still supplied as context.
+
+When an agent exits, its terminal is wiped, or Neovim quits normally, the plugin removes its worktree if it is clean. The task branch is retained, including unmerged commits. Reopening the link recreates the worktree from that branch at the same path and resumes the session. The plugin never merges task work automatically.
+
+Modified, untracked, and ignored files prevent removal. The plugin reports the retained directory so you can review and commit the work. After handling those files, run `:TodoAgentCleanup` on the task line to retry cleanup. It refuses while the task agent is running. No cleanup uses `--force` or deletes branches. A crash or forced process kill can leave worktrees behind; reopen the task or use the cleanup command afterward.
+
+To integrate completed work, review and merge its `todo-agent/<task-id>` branch in your main checkout. Delete that branch yourself when you no longer need to reopen the task. Use `worktrees = false` to launch new tasks directly in the project directory, including outside Git. Existing linked tasks retain their original isolation setting.
 
 ## Reopen after restart
 
@@ -67,6 +77,7 @@ require('todo_agents').setup({
   provider = 'codex',
   mappings = true, -- false to keep your own mappings, including gx
   context = true, -- false to send only the task text
+  worktrees = true, -- automatically create and safely remove task worktrees
   commands = {
     codex = { 'codex' },
     claude = { 'claude', '--model', 'sonnet' },
@@ -89,7 +100,7 @@ mise run test
 
 `mise.toml` pins Neovim and GitHub CLI for development. The plugin itself supports Neovim 0.10+; CI checks the minimum version and stable.
 
-Tests run in isolated state directories, with fake CLI processes; they require no account and make no provider API calls. They cover task parsing, checkbox preservation, terminal launching and reopening, unsaved context, Codex transcript binding, manual binding, and unavailable executables. Live provider authentication and execution need a manual smoke test on a configured machine.
+Tests run in isolated state directories, with fake CLI processes; they require no account and make no provider API calls. They cover task parsing, checkbox preservation, terminal launching and reopening, unsaved context, Codex transcript binding, manual binding, unavailable executables, isolated Git branches, worktree recreation, dirty/ignored-file preservation, launch failure cleanup, and Neovim shutdown cleanup. Live provider authentication and execution need a manual smoke test on a configured machine.
 
 Create and push the private GitHub repository from this checkout under your authenticated GitHub account:
 

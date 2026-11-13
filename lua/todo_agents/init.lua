@@ -1,7 +1,8 @@
 local M = {}
 local task = require('todo_agents.task')
+local worktree = require('todo_agents.worktree')
 local config = { provider = 'codex', commands = { codex = { 'codex' }, claude = { 'claude' } },
-  mappings = true, context = true }
+  mappings = true, context = true, worktrees = true }
 local live = {}
 local uv = vim.uv or vim.loop
 
@@ -24,6 +25,14 @@ local function load(id)
   local path = dir() .. '/' .. id .. '.json'
   if vim.fn.filereadable(path) == 0 then error('Session metadata missing on this machine: ' .. id) end
   return vim.json.decode(table.concat(vim.fn.readfile(path), '\n'))
+end
+local function cleanup(record)
+  local ok, removed, message = pcall(worktree.cleanup, record)
+  if not ok then
+    vim.notify('todo-agents: worktree cleanup failed: ' .. tostring(removed), vim.log.levels.WARN)
+  elseif not removed then
+    vim.notify('todo-agents: ' .. message, vim.log.levels.WARN)
+  end
 end
 local function current()
   local row = vim.api.nvim_win_get_cursor(0)[1]
@@ -84,20 +93,27 @@ local function launch(record, resume)
     end
     table.insert(argv, record.prompt)
   end
+  worktree.prepare(record, dir())
+  save(record)
   vim.cmd('botright vsplit')
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_win_set_buf(0, buf)
-  local job = vim.fn.termopen(argv, { cwd = record.cwd, on_exit = function(_, code)
-    live[record.id] = nil
-    if code ~= 0 then vim.schedule(function()
-      vim.notify('todo-agents: ' .. record.provider .. ' exited with code ' .. code, vim.log.levels.WARN)
-    end) end
+  local ok, job = pcall(vim.fn.termopen, argv, { cwd = record.cwd, on_exit = function(_, code)
+    -- Clear and clean together so reopening cannot race a queued cleanup.
+    vim.schedule(function()
+      live[record.id] = nil
+      cleanup(record)
+      if code ~= 0 then
+        vim.notify('todo-agents: ' .. record.provider .. ' exited with code ' .. code, vim.log.levels.WARN)
+      end
+    end)
   end })
-  if job <= 0 then
+  if not ok or job <= 0 then
+    cleanup(record)
     vim.api.nvim_buf_delete(buf, { force = true })
     error('Failed to start ' .. record.provider)
   end
-  live[record.id] = { buf = buf, job = job }
+  live[record.id] = { buf = buf, job = job, record = record }
   vim.bo[buf].bufhidden = 'hide'
   vim.b[buf].todo_agent_id = record.id
   save(record)
@@ -120,7 +136,11 @@ function M.start(provider)
   if not vim.bo[buf].modifiable then error('TODO buffer is not modifiable') end
   local path = vim.api.nvim_buf_get_name(buf)
   local base = path ~= '' and vim.fs.dirname(path) or vim.fn.getcwd()
-  local root = vim.fs.root(base, '.git') or base
+  local root = base
+  if vim.fn.executable('git') == 1 then
+    local result = vim.system({ 'git', '-C', base, 'rev-parse', '--show-toplevel' }, { text = true }):wait(10000)
+    if result.code == 0 then root = vim.trim(result.stdout) end
+  end
   local id = uuid()
   local snapshot = dir() .. '/' .. id .. '.md'
   local prompt
@@ -134,7 +154,10 @@ function M.start(provider)
     prompt = 'Work on this TODO item:\n' .. parsed.text
   end
   prompt = prompt .. '\n\nLaunch marker: todo-agent-task:' .. id
-  local record = { id = id, provider = provider, cwd = root, prompt = prompt, source = path, started = os.time() }
+  local record = { id = id, provider = provider, cwd = root, prompt = prompt, source = path, started = os.time(), isolated = config.worktrees }
+  if config.worktrees then
+    record.prompt = record.prompt .. '\nWork only in the task Git worktree provided as your working directory.'
+  end
   -- Only change the TODO after the process has successfully started.
   launch(record, false)
   vim.api.nvim_buf_set_lines(buf, row - 1, row, false, { task.link(parsed, provider, id) })
@@ -147,6 +170,25 @@ function M.open()
   if record.provider ~= parsed.provider then error('Link provider does not match session metadata') end
   launch(record, true)
 end
+
+function M.cleanup()
+  local parsed = current()
+  if not parsed.id then error('No agent linked to this task') end
+  if live[parsed.id] then error('Stop the task agent before cleaning its worktree') end
+  cleanup(load(parsed.id))
+end
+
+-- Stop processes before removing their directories during a normal Neovim exit.
+vim.api.nvim_create_autocmd('VimLeavePre', {
+  group = vim.api.nvim_create_augroup('TodoAgentsLifecycle', { clear = true }),
+  callback = function()
+    for _, session in pairs(live) do
+      pcall(vim.fn.jobstop, session.job)
+      local result = vim.fn.jobwait({ session.job }, 1000)[1]
+      if result ~= -1 then cleanup(session.record) end
+    end
+  end,
+})
 
 function M.toggle()
   local parsed, row = current()

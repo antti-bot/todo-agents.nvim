@@ -5,6 +5,7 @@ Requires Neovim 0.10+ and Codex CLI or Claude Code.
 :TodoAgent [provider]     Launch task under cursor, or open linked task.
 :TodoAgentOpen            Open linked agent terminal or resume its session.
 :TodoAgentToggle          Toggle the checkbox without changing its link.
+:TodoAgentCleanup         Remove a stopped task worktree when clean.
 :TodoAgentBind {id}       Bind task/terminal to a provider session ID.
 
 Call require('todo_agents').setup() to enable default mappings:
@@ -17,6 +18,11 @@ Pass { mappings = false } to supply your own mappings.
 Pass { context = false } to omit the buffer snapshot.
 
 Links and context snapshots persist under stdpath('state')/todo-agents.
+Each task gets a Git worktree and branch by default. Clean worktrees are
+removed when the agent exits; task branches survive for reopening. Dirty,
+untracked and ignored files prevent removal. :TodoAgentCleanup retries.
+Set { worktrees = false } to use the original project directory.
+
 Save the TODO buffer normally; the plugin does not write it to disk.
 Codex transcript discovery binds an exact session when possible; use
 :TodoAgentBind with the ID from /status if discovery is unavailable.

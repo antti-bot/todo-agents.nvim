@@ -12,3 +12,5 @@ end), { nargs = '?', complete = function() return { 'codex', 'claude' } end })
 vim.api.nvim_create_user_command('TodoAgentOpen', run(function() require('todo_agents').open() end), {})
 vim.api.nvim_create_user_command('TodoAgentToggle', run(function() require('todo_agents').toggle() end), {})
 vim.api.nvim_create_user_command('TodoAgentBind', run(function(args) require('todo_agents').bind(args.args) end), { nargs = 1 })
+
+vim.api.nvim_create_user_command('TodoAgentCleanup', run(function() require('todo_agents').cleanup() end), {})
