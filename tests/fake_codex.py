@@ -6,7 +6,12 @@ import sys
 import time
 
 with open(os.environ['TODO_TEST_LAUNCHES'], 'a') as output:
-    output.write(json.dumps({'cwd': os.getcwd(), 'argv': sys.argv[1:], 'pane': os.environ['HERDR_PANE_ID']}) + '\n')
+    launch = {
+        'cwd': os.getcwd(),
+        'argv': sys.argv[1:],
+        'pane': os.environ['HERDR_PANE_ID'],
+    }
+    output.write(json.dumps(launch) + '\n')
 subprocess.run([
     os.environ['HERDR_BIN_PATH'], 'pane', 'report-agent', os.environ['HERDR_PANE_ID'],
     '--source', 'todo-test', '--agent', 'codex', '--state', 'idle',

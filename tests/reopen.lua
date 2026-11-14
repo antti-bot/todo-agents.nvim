@@ -1,7 +1,9 @@
 local plugin = vim.fn.getcwd()
 vim.opt.rtp:prepend(plugin)
+
 local agent = require('todo_agents')
 local herdr = require('todo_agents.worktree').herdr
+
 local function test()
   local saved = vim.fn.readfile(vim.env.XDG_STATE_HOME .. '/reopen-task')
   local uri, path, pane_id, workspace = unpack(saved)
@@ -9,7 +11,9 @@ local function test()
   local panes = herdr({ 'pane', 'list', '--workspace', workspace }).panes
   local alive = false
   for _, pane in ipairs(panes) do
-    if pane.pane_id == pane_id then alive = pane.agent == 'codex' end
+    if pane.pane_id == pane_id then
+      alive = pane.agent == 'codex'
+    end
   end
   assert(alive, 'Neovim exit stopped the agent')
   vim.api.nvim_buf_set_lines(0, 0, -1, false, { '[Task](' .. uri .. ')' })
@@ -27,5 +31,11 @@ local function test()
   assert(#vim.fn.readfile(vim.env.TODO_TEST_LAUNCHES) == 2)
   print('Neovim restart preserves agents; closed workspaces reopen without losing edits')
 end
+
 local ok, err = xpcall(test, debug.traceback)
-if not ok then io.stderr:write(err .. '\n'); vim.cmd('cquit 1') else vim.cmd('qa!') end
+if not ok then
+  io.stderr:write(err .. '\n')
+  vim.cmd('cquit 1')
+else
+  vim.cmd('qa!')
+end
